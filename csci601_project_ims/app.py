@@ -1,5 +1,7 @@
+
 from flask import Flask, render_template, request, redirect, url_for, flash
-import pymysql
+
+# import pymysql
 from extensions import db  # Import db from extensions.py
 
 
