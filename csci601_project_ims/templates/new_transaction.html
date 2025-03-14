@@ -1,0 +1,19 @@
+<form action="{{ url_for('new_transaction') }}" method="POST">
+  <label for="product_id">Product ID:</label>
+  <input type="number" name="product_id" required />
+
+  <label for="transaction_type">Transaction Type:</label>
+  <select name="transaction_type">
+    {% for type in transaction_types %}
+    <option value="{{ type.name }}">{{ type.value }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="quantity">Quantity:</label>
+  <input type="number" name="quantity" required />
+
+  <label for="unit_price">Unit Price:</label>
+  <input type="text" name="unit_price" required />
+
+  <button type="submit">Submit</button>
+</form>

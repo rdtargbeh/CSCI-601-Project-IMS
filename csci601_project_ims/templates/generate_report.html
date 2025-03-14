@@ -1,0 +1,17 @@
+<form action="{{ url_for('generate_report') }}" method="POST">
+  <label for="report_type">Report Type:</label>
+  <select name="report_type">
+    {% for type in report_types %}
+    <option value="{{ type.name }}">{{ type.value }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="format">Report Format:</label>
+  <select name="format">
+    <option value="CSV">CSV</option>
+    <option value="PDF">PDF</option>
+    <option value="Excel">Excel</option>
+  </select>
+
+  <button type="submit">Generate</button>
+</form>
