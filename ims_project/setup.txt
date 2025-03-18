@@ -1,0 +1,31 @@
+mkdir ims_project 
+cd ims_project
+
+// Create and activate a virtual environment:
+python -m venv venv
+venv\Scripts\activate
+
+// Install Django and required packages:
+pip install django djangorestframework mysqlclient django-cors-headers
+
+// Initialize Django Project
+django-admin startproject backend
+cd backend
+
+// Create an app for inventory management:
+python manage.py startapp inventory
+
+// Migrate new changes
+python manage.py makemigrations inventory
+python manage.py migrate
+
+// Create a React App inside the project directory:
+npx create-react-app frontend
+cd frontend
+
+// Install Required Dependencies:
+npm install react-router-dom axios
+
+
+
+
