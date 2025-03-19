@@ -6,16 +6,20 @@ from django.shortcuts import render
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
 from rest_framework import viewsets
+from rest_framework.response import Response
+from rest_framework.decorators import action
+from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated  # ✅ Import DRF authentication
 from rest_framework.authtoken.models import Token
-from .models import Category, Product, SalesRecord
-from .serializers import CategorySerializer, ProductSerializer, SalesRecordSerializer
+from rest_framework.parsers import MultiPartParser, FormParser
+from .models import Category, Product, SalesRecord, Supplier  
+from .serializers import CategorySerializer, ProductSerializer, SalesRecordSerializer, SupplierSerializer
 
 
 User = get_user_model()
 
-# ✅ Fix: Replace @login_required with API authentication
+#  USER PROFILE VIEW  +++++++++++++++++++++++++++++++++++++++
 @api_view(["GET", "PUT"])
 @permission_classes([IsAuthenticated])
 def user_profile(request):
@@ -45,7 +49,7 @@ def user_profile(request):
 
     return JsonResponse({"error": "Invalid request"}, status=400)
 
-# Register User
+# REGISTER USER VIEW ++++++++++++++++++++++++++++++++++++++++++++++
 @csrf_exempt
 def register_user(request):
     if request.method == "POST":
@@ -68,7 +72,7 @@ def register_user(request):
     return JsonResponse({"error": "Invalid request"}, status=400)
 
 
-#  Login User
+#  LOGIN USER VIEW  +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 @csrf_exempt
 def login_user(request):
     """Authenticate user and return a token."""
@@ -96,12 +100,42 @@ def logout_user(request):
     return JsonResponse({"message": "Logged out successfully!"})
 
 
+
+#  CATEGORY VIEW  +++++++++++++++++++++++++++++++++++++++++++
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all().order_by("-date_created")
+    serializer_class = CategorySerializer
+
+    @action(detail=True, methods=["delete"])
+    def delete_category(self, request, pk=None):
+        category = get_object_or_404(Category, pk=pk)
+        category.delete()
+        return Response({"message": "Category deleted successfully"}, status=204)
+
+
+
+#  PRODUCT VIEW  ++++++++++++++++++++++++++++++++++++++++++++++++++
+class ProductViewSet(viewsets.ModelViewSet):
+    queryset = Product.objects.all().order_by("-date_updated")
+    serializer_class = ProductSerializer
+    parser_classes = (MultiPartParser, FormParser)  # ✅ Handle file uploads
+    permission_classes = [IsAuthenticated]  # ✅ Restrict access to logged-in users
+
+    def destroy(self, request, *args, **kwargs):
+        """Allow only admins to delete products"""
+        if not request.user.is_staff:
+            return Response({"error": "You are not authorized to delete products"}, status=403)
+        return super().destroy(request, *args, **kwargs)
+
+class SupplierViewSet(viewsets.ModelViewSet):
+    queryset = Supplier.objects.all().order_by("supplier_name")
+    serializer_class = SupplierSerializer
+
+
+
 # ✅ Move the ViewSet inside a function to avoid circular import issues
 def get_viewsets():
-    class CategoryViewSet(viewsets.ModelViewSet):
-        queryset = Category.objects.all()
-        serializer_class = CategorySerializer
-
+ 
     class ProductViewSet(viewsets.ModelViewSet):
         queryset = Product.objects.all()
         serializer_class = ProductSerializer
@@ -123,3 +157,6 @@ class ProductViewSet(viewsets.ModelViewSet):
     """API endpoint for managing products."""
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
+
+
+    

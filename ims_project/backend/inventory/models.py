@@ -1,4 +1,5 @@
 from django.db import models
+import uuid
 from django.contrib.auth.models import AbstractUser, Group, Permission
 
 # Custom User Model
@@ -45,12 +46,12 @@ class Supplier(models.Model):
     def __str__(self):
         return self.supplier_name
 
-# Product Table
+# Product Table +++++++++++++++++++++++++++++++++++++++++
 class Product(models.Model):
     product_name = models.CharField(max_length=100)
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
-    sku = models.CharField(max_length=30, unique=True)
-    barcode = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    sku = models.CharField(max_length=30, unique=True, blank=True, null=True)  # ✅ Allow auto-generation
+    barcode = models.CharField(max_length=50, unique=True, blank=True, null=True)
     buying_price = models.DecimalField(max_digits=10, decimal_places=2)
     selling_price = models.DecimalField(max_digits=10, decimal_places=2)
     stock = models.PositiveIntegerField()
@@ -62,10 +63,22 @@ class Product(models.Model):
     date_created = models.DateTimeField(auto_now_add=True)
     date_updated = models.DateTimeField(auto_now=True)
 
+    def save(self, *args, **kwargs):
+        if not self.sku:
+            category_code = self.category.category_name[:3].upper()
+            product_code = self.product_name[:3].upper()
+            unique_id = str(uuid.uuid4().hex[:4]).upper()
+            self.sku = f"{category_code}-{product_code}-{unique_id}"
+
+        if not self.barcode:
+            self.barcode = str(uuid.uuid4().hex[:12]).upper()
+
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.product_name
 
-# Inventory Table
+# Inventory Table  ++++++++++++++++++++++++++++++++++++++++++++++
 class Inventory(models.Model):
     product = models.OneToOneField(Product, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField()
@@ -77,7 +90,7 @@ class Inventory(models.Model):
     def __str__(self):
         return f"{self.product.product_name} - {self.quantity} in stock"
 
-# Transaction Table
+# Transaction Table   +++++++++++++++++++++++++++++++++++++++++++++
 class Transaction(models.Model):
     TRANSACTION_TYPES = [
         ('Sale', 'Sale'),
