@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 import os
+import logging
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -28,6 +29,12 @@ SECRET_KEY = 'django-insecure-qp97#3r5#zdw=6g29(7b0l)ty&bexp*b98!v!ah=^y*jl-g5yk
 DEBUG = True
 
 ALLOWED_HOSTS = []
+
+# ALLOWED_HOSTS = [
+#     "127.0.0.1",
+#     "localhost",
+#     "localhost:3000",  # ✅ Allow frontend requests from React
+# ]
 
 
 # Application definition
@@ -150,6 +157,8 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+logging.basicConfig(level=logging.DEBUG)
+
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",  # React frontend
@@ -164,7 +173,8 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",  # ✅ Require authentication by default
+        "rest_framework.permissions.AllowAny",  # ✅ Allow unauthenticated access
+        # "rest_framework.permissions.IsAuthenticated",  # ✅ Require authentication by default
     ],
 }
 
