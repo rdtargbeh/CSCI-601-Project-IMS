@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import login_user, logout_user, register_user, user_profile
+from .views import login_user, logout_user, register_user, user_profile, UserListView   
 from django.conf import settings
 from django.conf.urls.static import static
 from . import views 
@@ -28,6 +28,7 @@ urlpatterns = [
     path("logout/", logout_user, name="logout"),
     path("user-profile/", user_profile, name="user-profile"),  # ✅ Ensure it's correctly imported
     path("register/", register_user, name="register_user"),
+    path('api/users/', UserListView.as_view(), name='user-list'), 
     # path('api/suppliers/my_suppliers/', views.my_suppliers, name='my_suppliers'), 
 ]
 

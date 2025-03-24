@@ -12,12 +12,13 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.exceptions import ValidationError
 from rest_framework.decorators import action
 from django.shortcuts import get_object_or_404
+from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.permissions import IsAuthenticated  # ✅ Import DRF authentication
 from rest_framework.authtoken.models import Token
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Category, Product, SalesRecord, Supplier, Inventory, Warehouse , Transaction 
+from .models import Category, Product, SalesRecord, Supplier, Inventory, Warehouse , Transaction, User 
 from .serializers import (
     CategorySerializer, ProductSerializer, SalesRecordSerializer, SupplierSerializer,
     InventorySerializer, WarehouseSerializer, TransactionSerializer 
@@ -27,34 +28,80 @@ from .serializers import (
 User = get_user_model()
 
 #  USER PROFILE VIEW  +++++++++++++++++++++++++++++++++++++++
-@api_view(["GET", "PUT"])
+@api_view(["GET", "PUT"])  # Allow both GET and PUT methods
 @permission_classes([IsAuthenticated])
 def user_profile(request):
-    """Retrieve the logged-in user's profile details."""
-    user = request.user
+    """Retrieve or update the logged-in user's profile details."""
+    user = request.user  # Get the logged-in user
 
     if request.method == "GET":
+        # Return the user's profile details in response
         return JsonResponse({
             "username": user.username,
-            "fullName": user.get_full_name(),
+            "fullName": user.full_name,
             "email": user.email,
             "phone": user.phone if hasattr(user, "phone") else None,
             "address": user.address if hasattr(user, "address") else None,
+            "role": user.role,
             "profilePic": user.profile_picture.url if hasattr(user, "profile_picture") and user.profile_picture else None,
         })
 
     if request.method == "PUT":
+        # Handle profile update logic
         try:
             data = json.loads(request.body)
             user.full_name = data.get("fullName", user.full_name)
             user.phone = data.get("phone", user.phone)
             user.address = data.get("address", user.address)
+            user.role = data.get("role", user.role)  # If needed, update the role
+            if 'profilePic' in data:
+                user.profile_picture = data['profilePic']  # Handle the profile picture if provided
+
             user.save()
             return JsonResponse({"message": "Profile updated successfully!"})
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=400)
 
     return JsonResponse({"error": "Invalid request"}, status=400)
+
+# @api_view(["GET", "PUT"])
+# @permission_classes([IsAuthenticated])
+# def user_profile(request):
+#     """Retrieve the logged-in user's profile details."""
+#     user = request.user
+
+#     if request.method == "GET":
+#         return JsonResponse({
+#             "username": user.username,
+#             "fullName": user.get_full_name(),
+#             "email": user.email,
+#             "phone": user.phone if hasattr(user, "phone") else None,
+#             "address": user.address if hasattr(user, "address") else None,
+#             "profilePic": user.profile_picture.url if hasattr(user, "profile_picture") and user.profile_picture else None,
+#         })
+
+#     if request.method == "PUT":
+#         try:
+#             data = json.loads(request.body)
+#             user.full_name = data.get("fullName", user.full_name)
+#             user.phone = data.get("phone", user.phone)
+#             user.address = data.get("address", user.address)
+#             user.save()
+#             return JsonResponse({"message": "Profile updated successfully!"})
+#         except Exception as e:
+#             return JsonResponse({"error": str(e)}, status=400)
+
+#     return JsonResponse({"error": "Invalid request"}, status=400)
+
+
+class UserListView(APIView):
+    permission_classes = [IsAuthenticated]  # Only authenticated users can access this view
+
+    def get(self, request):
+        users = User.objects.all()  # Get all users from the database
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
+
 
 # REGISTER USER VIEW ++++++++++++++++++++++++++++++++++++++++++++++
 @csrf_exempt

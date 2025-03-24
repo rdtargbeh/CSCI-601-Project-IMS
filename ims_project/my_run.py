@@ -16,4 +16,7 @@ Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
 
 ims_user
 
+# delete migration
+rm -rf backend/inventory/migrations/*
+
 Sql@53dTU6d 
