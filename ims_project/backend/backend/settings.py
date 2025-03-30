@@ -32,7 +32,7 @@ ALLOWED_HOSTS = []
 
 # ALLOWED_HOSTS = [
 #     "127.0.0.1",
-#     "localhost",
+#     "localhost", 
 #     "localhost:3000",  # ✅ Allow frontend requests from React
 # ]
 

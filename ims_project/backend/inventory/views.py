@@ -2,6 +2,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
 import json
+from django.db.models import Sum
 from django.shortcuts import render
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
@@ -18,10 +19,11 @@ from rest_framework.authentication import TokenAuthentication
 from rest_framework.permissions import IsAuthenticated  # ✅ Import DRF authentication
 from rest_framework.authtoken.models import Token
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Category, Product, SalesRecord, Supplier, Inventory, Warehouse , Transaction, User 
+from rest_framework import generics
+from .models import Category, Product, SalesRecord, Supplier, Inventory, Warehouse , Transaction, User, Report 
 from .serializers import (
     CategorySerializer, ProductSerializer, SalesRecordSerializer, SupplierSerializer,
-    InventorySerializer, WarehouseSerializer, TransactionSerializer 
+    InventorySerializer, WarehouseSerializer, TransactionSerializer, ReportSerializer 
     )
 
 
@@ -63,35 +65,6 @@ def user_profile(request):
             return JsonResponse({"error": str(e)}, status=400)
 
     return JsonResponse({"error": "Invalid request"}, status=400)
-
-# @api_view(["GET", "PUT"])
-# @permission_classes([IsAuthenticated])
-# def user_profile(request):
-#     """Retrieve the logged-in user's profile details."""
-#     user = request.user
-
-#     if request.method == "GET":
-#         return JsonResponse({
-#             "username": user.username,
-#             "fullName": user.get_full_name(),
-#             "email": user.email,
-#             "phone": user.phone if hasattr(user, "phone") else None,
-#             "address": user.address if hasattr(user, "address") else None,
-#             "profilePic": user.profile_picture.url if hasattr(user, "profile_picture") and user.profile_picture else None,
-#         })
-
-#     if request.method == "PUT":
-#         try:
-#             data = json.loads(request.body)
-#             user.full_name = data.get("fullName", user.full_name)
-#             user.phone = data.get("phone", user.phone)
-#             user.address = data.get("address", user.address)
-#             user.save()
-#             return JsonResponse({"message": "Profile updated successfully!"})
-#         except Exception as e:
-#             return JsonResponse({"error": str(e)}, status=400)
-
-#     return JsonResponse({"error": "Invalid request"}, status=400)
 
 
 class UserListView(APIView):
@@ -147,6 +120,7 @@ def login_user(request):
     return JsonResponse({"error": "Invalid request"}, status=400)
 
 
+#  LOGOUT VIEW  +++++++++++++++++++++++++++++++++++++++++++
 @csrf_exempt
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -154,6 +128,65 @@ def logout_user(request):
     """Logout user and delete the token."""
     request.auth.delete()
     return JsonResponse({"message": "Logged out successfully!"})
+
+
+#  DASHBOARD VIEW  +++++++++++++++++++++++++++++++++++++++++++
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_stats(request):
+    # 1. Available inventory: sum of all Product.stock values.
+    available_inventory = Product.objects.aggregate(total=Sum('stock'))['total'] or 0
+
+    # 2. Aggregate SalesRecord fields.
+    sales_agg = SalesRecord.objects.aggregate(
+        total_sale_amount=Sum('total_sale_amount'),
+        total_purchase_amount=Sum('total_purchase_amount'),
+        total_quantity_purchased=Sum('total_quantity_purchased'),
+        total_quantity_sold=Sum('total_quantity_sold')
+    )
+    total_sale_amount = sales_agg.get('total_sale_amount') or 0
+    total_purchase_amount = sales_agg.get('total_purchase_amount') or 0
+    total_inventory_purchased = sales_agg.get('total_quantity_purchased') or 0
+    total_inventory_sold = sales_agg.get('total_quantity_sold') or 0
+
+    # 3. Calculate profit/loss using per-transaction logic.
+    transactions = Transaction.objects.filter(transaction_type__in=["Sale", "Damaged", "Expired"])
+    total_profit = 0
+    for txn in transactions:
+        if txn.transaction_type == "Sale":
+            # Profit = (sale unit price - buying price) * quantity sold.
+            total_profit += (txn.unit_price - txn.product.buying_price) * txn.quantity
+        elif txn.transaction_type in ["Damaged", "Expired"]:
+            # Loss due to damage/expiration: cost of items lost.
+            total_profit -= txn.product.buying_price * txn.quantity
+
+    profit_display = total_profit if total_profit >= 0 else 0
+    loss_display = abs(total_profit) if total_profit < 0 else 0
+
+    # 4. Recent transactions (last 10).
+    recent_transactions_qs = Transaction.objects.order_by('-transaction_date')[:10]
+    recent_transactions = TransactionSerializer(recent_transactions_qs, many=True).data
+
+    # 5. Recent reports (last 6).
+    recent_reports_qs = Report.objects.order_by('-generated_date')[:6]
+    recent_reports = [
+        {"id": rep.id, "title": rep.title, "generated_date": rep.generated_date}
+        for rep in recent_reports_qs
+    ]
+
+    data = {
+        "available_inventory": available_inventory,
+        "total_sale_amount": total_sale_amount,
+        "total_purchase_amount": total_purchase_amount,
+        "total_inventory_purchased": total_inventory_purchased,
+        "total_inventory_sold": total_inventory_sold,
+        "profit": round(profit_display, 2),
+        "loss": round(loss_display, 2),
+        "recent_transactions": recent_transactions,
+        "recent_reports": recent_reports,
+    }
+    
+    return Response(data)
 
 
 
@@ -304,6 +337,24 @@ class TransactionViewSet(viewsets.ModelViewSet):
         Retrieve a specific transaction
         """
         return super().retrieve(request, *args, **kwargs)
+    # User transaction by
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["request"] = self.request
+        return context
+
+
+
+#  REPORT VIEW  ++++++++++++++++++++++++++++++++++++++++++++++++++
+class ReportCreateView(generics.CreateAPIView):
+    queryset = Report.objects.all()
+    serializer_class = ReportSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        # Automatically set the user to the logged-in user.
+        serializer.save(user=self.request.user)
+
 
 
 

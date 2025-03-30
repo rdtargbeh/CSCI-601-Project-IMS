@@ -3,8 +3,10 @@ from django.db import models
 from datetime import date
 from django.utils.timezone import now
 import logging
+from django.db.models import Sum
 import uuid
 from django.contrib.auth.models import AbstractUser, Group, Permission
+
 
 # Custom User Model
 class User(AbstractUser):
@@ -27,7 +29,8 @@ class User(AbstractUser):
     def __str__(self):
         return self.username
 
-# Category Table
+
+#  Category Table Model  +++++++++++++++++++++++++++++++++++++++
 class Category(models.Model):
     category_name = models.CharField(max_length=50, unique=True)
     description = models.TextField(null=True, blank=True)
@@ -35,8 +38,18 @@ class Category(models.Model):
 
     def __str__(self):
         return self.category_name
-2
-# Supplier Table
+
+
+#  Warehouse Table Model  +++++++++++++++++++++++++++++++++++++++
+class Warehouse(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    location = models.CharField(max_length=255)
+
+    def __str__(self):
+        return f"{self.name} ({self.location})"
+
+
+#  Supplier Table Model  +++++++++++++++++++++++++++++++++++++++
 class Supplier(models.Model):
     supplier_name = models.CharField(max_length=100)
     contact_person = models.CharField(max_length=50, null=True, blank=True)
@@ -53,17 +66,18 @@ class Supplier(models.Model):
 
 logger = logging.getLogger(__name__)  # ✅ Logger for low stock warnings
 
+
 # Product Table +++++++++++++++++++++++++++++++++++++++++
 class Product(models.Model):
     product_name = models.CharField(max_length=100)
-    category = models.ForeignKey(Category, on_delete=models.CASCADE)
-    sku = models.CharField(max_length=30, unique=True, blank=True, null=True)  # ✅ Allow auto-generation
+    category = models.ForeignKey('Category', on_delete=models.CASCADE)
+    sku = models.CharField(max_length=30, unique=True, blank=True, null=True)  # Auto-generated if not provided.
     barcode = models.CharField(max_length=50, unique=True, blank=True, null=True)
     buying_price = models.DecimalField(max_digits=10, decimal_places=2)
     selling_price = models.DecimalField(max_digits=10, decimal_places=2)
-    stock = models.PositiveIntegerField()
+    stock = models.PositiveIntegerField(default=0)  # Aggregated stock from inventories.
     low_stock_threshold = models.PositiveIntegerField(default=3)
-    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True)
+    supplier = models.ForeignKey('Supplier', on_delete=models.SET_NULL, null=True, blank=True)
     expiration_date = models.DateField(null=True, blank=True)
     image_url = models.TextField(null=True, blank=True)
     description = models.TextField(null=True, blank=True)
@@ -72,63 +86,64 @@ class Product(models.Model):
     low_stock_warning = models.TextField(blank=True, null=True) 
 
     def save(self, *args, **kwargs):
-        # ✅ Auto-generate SKU
+        # Auto-generate SKU if not provided.
         if not self.sku:
             category_code = self.category.category_name[:3].upper()
             product_code = self.product_name[:3].upper()
             unique_id = str(uuid.uuid4().hex[:4]).upper()
             self.sku = f"{category_code}-{product_code}-{unique_id}"
 
-        # ✅ Auto-generate Barcode
+        # Auto-generate Barcode if not provided.
         if not self.barcode:
             self.barcode = str(uuid.uuid4().hex[:12]).upper()
 
-        # Ensure stock reflects total inventory across all warehouses
-        self.stock = self.inventory.aggregate(total_stock=models.Sum('quantity'))['total_stock'] or 0
-        
-        
-        # 🔹 Ensure Stock is Not Negative
+        # Determine if this is a new instance.
+        is_new = self.pk is None
+
+        # If new, save once so a primary key is generated.
+        if is_new:
+            super().save(*args, **kwargs)
+
+        # Aggregate stock from all related inventories.
+        total_stock = self.inventories.aggregate(total_stock=Sum('quantity'))['total_stock'] or 0
+        self.stock = total_stock
+
+        # Validations.
         if self.stock < 0:
             raise ValidationError("Stock cannot be negative.")
-
-        # 🔹 Ensure Buying Price is Not Negative
         if self.buying_price < 0:
             raise ValidationError("Buying price cannot be negative.")
-        
-          # 🔹 Ensure Selling Price is Valid
         if self.selling_price < self.buying_price:
             raise ValidationError("Selling price cannot be lower than the buying price.")
-
-
-        # 🔹 Validate Expiration Date
         if self.expiration_date and self.expiration_date < date.today():
             raise ValidationError("Expiration date cannot be in the past.")
 
-        # 🔹 Validate Low Stock (Raise Warning Instead of Error)
         if self.stock < self.low_stock_threshold:
             self.low_stock_warning = f"⚠️ Warning: {self.product_name} stock is low ({self.stock} items remaining). Please restock!"
         else:
             self.low_stock_warning = None
 
-        print(f"Saving Product: {self.product_name}, Warning: {self.low_stock_warning}")  # ✅ Debugging
+        print(f"Saving Product: {self.product_name}, Warning: {self.low_stock_warning}")
 
-        super().save(*args, **kwargs)
+        # For new instances, update the record directly using queryset.update()
+        # to avoid calling super().save() twice (which can attempt a duplicate insert).
+        if is_new:
+            self.__class__.objects.filter(pk=self.pk).update(
+                stock=self.stock, low_stock_warning=self.low_stock_warning
+            )
+        else:
+            # For updates, simply call super().save() to update the instance.
+            super().save(*args, **kwargs)
 
     def __str__(self):
         return self.product_name
 
 
-#  Warehouse Table Model  +++++++++++++++++++++++++++++++++++++++
-class Warehouse(models.Model):
-    name = models.CharField(max_length=100, unique=True)
-    location = models.CharField(max_length=255)
-
-    def __str__(self):
-        return f"{self.name} ({self.location})"
-
 # Inventory Table  ++++++++++++++++++++++++++++++++++++++++++++++
 class Inventory(models.Model):
-    product = models.OneToOneField(Product, on_delete=models.CASCADE, related_name="inventory")
+    
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="inventories")
+    # product = models.OneToOneField(Product, on_delete=models.CASCADE, related_name="inventory")
     warehouse = models.ForeignKey(Warehouse, on_delete=models.CASCADE, related_name="inventory_stock")
     quantity = models.PositiveIntegerField()
     incoming_stock = models.PositiveIntegerField(default=0)  # ✅ Tracks stock added
@@ -138,42 +153,36 @@ class Inventory(models.Model):
     last_updated = models.DateTimeField(auto_now=True)
     low_stock_threshold = models.PositiveIntegerField(default=3)
 
+
     def save(self, *args, **kwargs):
-        # 🔹 Prevent negative stock
+        # Prevent negative stock and overselling
         if self.quantity < 0:
             raise ValidationError("Stock quantity cannot be negative.")
-
-        # 🔹 Prevent selling more than available stock
         if self.outgoing_stock > self.quantity:
             raise ValidationError("Cannot sell more stock than available.")
 
-        # 🔹 Auto-update stock based on transactions
+        # Calculate the new quantity (update based on incoming/outgoing adjustments)
         new_quantity = self.quantity + self.incoming_stock - self.outgoing_stock
         if new_quantity < 0:
             raise ValidationError("Stock update results in negative quantity.")
-
         self.quantity = new_quantity
-  # 🔹 Update product stock level
-        self.product.stock = self.quantity  
-        self.product.save()
 
-
-        # 🔹 Reset incoming/outgoing stock after update
+        # Update the related product’s aggregated stock across all inventories.
+        total_stock = self.product.inventories.aggregate(total_stock=Sum('quantity'))['total_stock'] or 0
+        # Instead of self.product.save(), update directly to bypass validations.
+        from .models import Product  # Ensure Product is imported
+        Product.objects.filter(pk=self.product.pk).update(stock=total_stock)
+     
+        # Reset the incoming/outgoing trackers after applying the update.
         self.incoming_stock = 0
         self.outgoing_stock = 0
 
-      
-        # 🔹 Low stock warning
         if self.quantity < self.low_stock_threshold:
             print(f"⚠️ Warning: {self.product.product_name} stock is low ({self.quantity} remaining). Please restock!")
-
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.product.product_name} - {self.quantity} in stock at {self.warehouse.name}"
-
-
-
 
 
 # TRANSACTION MODEL   +++++++++++++++++++++++++++++++++++++++++++++
@@ -194,6 +203,7 @@ class Transaction(models.Model):
     total_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # Added field for total price
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     batch_number = models.CharField(max_length=50, null=True, blank=True)
+    transaction_by = models.CharField(max_length=255, blank=True, null=True)
     transaction_date = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, default="Completed")
     
@@ -201,75 +211,91 @@ class Transaction(models.Model):
     from_warehouse = models.ForeignKey(Warehouse, on_delete=models.SET_NULL, null=True, related_name="from_warehouse_transactions")
     to_warehouse = models.ForeignKey(Warehouse, on_delete=models.SET_NULL, null=True, related_name="to_warehouse_transactions")
 
-    def save(self, *args, **kwargs):
-        # Calculate total price: unit_price * quantity
-        self.total_price = self.unit_price * self.quantity
-        
-        # Handle inventory updates based on transaction type
-        if self.transaction_type == 'Sale':
-            self._update_inventory(outgoing=True)
-        elif self.transaction_type in ['Purchase', 'Return']:
-            self._update_inventory(incoming=True)
-        elif self.transaction_type in ['Damaged', 'Expired']:
-            self._update_inventory(outgoing=True)
-        elif self.transaction_type == 'Transfer':
-            # Handle transfer logic (update warehouse location without affecting stock count)
-            self._handle_transfer()
-        
-        # After saving the transaction, update the SalesRecord
-        sales_record, created = SalesRecord.objects.get_or_create(product=self.product)
-        sales_record.update_record(self)  # Updates total sales or purchases
 
+    def save(self, *args, **kwargs):
+        # Calculate total price.
+        self.total_price = self.unit_price * self.quantity
+
+        # Update inventory and product stock based on transaction type.
+        if self.transaction_type == 'Transfer':
+            self._handle_transfer()
+        else:
+            # For Purchase and Return, treat as incoming (stock increases);
+            # For Sale, Damaged, or Expired, treat as outgoing (stock decreases).
+            is_incoming = self.transaction_type in ['Purchase', 'Return']
+            self._update_inventory(incoming=is_incoming, outgoing=(not is_incoming))
         super().save(*args, **kwargs)
-    
+
+        # Update SalesRecord for statistics.
+        from .models import SalesRecord
+        sale_record, created = SalesRecord.objects.get_or_create(product=self.product)
+        sale_record.update_record(self)
+
+
     def _update_inventory(self, incoming=False, outgoing=False):
-        """Update the inventory based on transaction type."""
-        inventory = Inventory.objects.get(product=self.product)
+        """
+        For non-transfer transactions, update the inventory for a default warehouse.
+        (You may adjust the warehouse selection logic based on your requirements.)
+        """
+        # Use a default warehouse (e.g. the first one in the database).
+        default_warehouse = Warehouse.objects.first()
+        if not default_warehouse:
+            raise ValidationError("No default warehouse found.")
+
+        inventory, created = Inventory.objects.get_or_create(
+            product=self.product,
+            warehouse=default_warehouse,
+            defaults={'quantity': 0, 'incoming_stock': 0, 'outgoing_stock': 0}
+        )
         if incoming:
-            inventory.quantity += self.quantity
+            # inventory.quantity = self.quantity
             inventory.incoming_stock += self.quantity
-        elif outgoing:
-            inventory.quantity -= self.quantity
+        else:
+            if inventory.quantity < self.quantity:
+                raise ValidationError("Not enough stock in the default warehouse for this transaction.")
+            # inventory.quantity -= self.quantity
             inventory.outgoing_stock += self.quantity
         inventory.save()
 
     def _handle_transfer(self):
-        """Handle transfer logic, where stock is moved between warehouses without affecting the total stock count."""
-        if not self.from_warehouse or not self.to_warehouse:
-            raise ValidationError("Both from_warehouse and to_warehouse must be provided for transfer.")
-
+        """
+        For transfers, move stock from the source warehouse to the target warehouse.
+        Increase target inventory and decrease source inventory.
+        """
+        if not (self.from_warehouse and self.to_warehouse):
+            raise ValidationError("Both from_warehouse and to_warehouse must be provided for a transfer.")
         if self.from_warehouse == self.to_warehouse:
             raise ValidationError("The from_warehouse and to_warehouse cannot be the same for a transfer.")
 
-        # Fetch the inventories in the source and destination warehouses
-        source_inventory = Inventory.objects.get(product=self.product, warehouse=self.from_warehouse)
-        target_inventory = Inventory.objects.get(product=self.product, warehouse=self.to_warehouse)
+        # Get source inventory record; if not found, raise error.
+        try:
+            source_inventory = Inventory.objects.get(product=self.product, warehouse=self.from_warehouse)
+        except Inventory.DoesNotExist:
+            raise ValidationError("No inventory record exists for this product in the source warehouse.")
 
-        # Ensure that there is enough stock in the source warehouse for the transfer
         if source_inventory.quantity < self.quantity:
             raise ValidationError("Not enough stock in the source warehouse for the transfer.")
 
-        # Transfer the stock: remove from source and add to target
-        source_inventory.quantity -= self.quantity
+        # Get or create target inventory record.
+        target_inventory, created = Inventory.objects.get_or_create(
+            product=self.product,
+            warehouse=self.to_warehouse,
+            defaults={'quantity': 0, 'incoming_stock': 0, 'outgoing_stock': 0}
+        )
+
+        # Adjust source and target inventories.
+        source_inventory.outgoing_stock += self.quantity
         source_inventory.save()
 
-        target_inventory.quantity += self.quantity
+        target_inventory.incoming_stock += self.quantity
         target_inventory.save()
 
-    def update_record(self, transaction):
-        """Update the sales record based on the transaction type."""
-        if transaction.transaction_type == 'Sale':
-            self.total_quantity_sold += transaction.quantity
-            self.total_sale_amount += transaction.total_price
-        elif transaction.transaction_type == 'Purchase':
-            self.total_quantity_purchased += transaction.quantity
-            self.total_purchase_amount += transaction.total_price
-        self.save()
-
     def __str__(self):
+        # Including product name in the transaction string.
         return f"{self.transaction_type} - {self.product.product_name} ({self.quantity})"
 
 
+    
 
 #  SALE RECORD MODEL  ++++++++++++++++++++++++++++++++++++++++
 class SalesRecord(models.Model):
@@ -356,9 +382,6 @@ class Payment(models.Model):
 
 
 
-
-
-
 # Reports Table
 class Report(models.Model):
     REPORT_TYPES = [
@@ -375,6 +398,8 @@ class Report(models.Model):
         ('Excel', 'Excel'),
     ]
 
+
+    title = models.CharField(max_length=100, blank=True, null=True, help_text="Optional report title for quick reference")
     report_type = models.CharField(max_length=30, choices=REPORT_TYPES)
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     format = models.CharField(max_length=10, choices=FORMAT_CHOICES)
@@ -383,7 +408,12 @@ class Report(models.Model):
     generated_date = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
+        # If title is provided, use it; otherwise, fall back to report_type and format.
+        if self.title:
+            return self.title
         return f"{self.report_type} ({self.format})"
+
+
 
 # Many-to-Many Relationships for Reports
 class ReportInventory(models.Model):
